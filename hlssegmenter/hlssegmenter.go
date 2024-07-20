@@ -10,10 +10,42 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"video_processor/constants"
+	"video_processor/utils"
 )
 
-func Run(inputFile string, outputDir string, playlistName string, segmentDuration int) {
+func ExecHLSSegmentVideo(outputDir string) {
+	videoNames, err := utils.GetVideoNames(outputDir)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, constants.MaxConcurrent)
+
+	for _, name := range videoNames {
+		wg.Add(1)
+		sem <- struct{}{}
+
+		go func(name string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			execSegmentCmd(
+				fmt.Sprintf("%s/%s", outputDir, name),
+				fmt.Sprintf("%s/output_segs/%s", outputDir, utils.RemoveFileExtension(name)),
+				"playlist.m3u8",
+				3,
+			)
+		}(name)
+	}
+
+	wg.Wait()
+}
+
+func execSegmentCmd(inputFile string, outputDir string, playlistName string, segmentDuration int) {
 	// Check if FFmpeg is installed
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		log.Fatal("FFmpeg not found. Please install FFmpeg to continue.")
