@@ -13,24 +13,11 @@ import (
 	"time"
 )
 
-// Constants for HLS segmentation
-const (
-	segmentDuration = 10 // Duration of each segment in seconds
-	playlistName    = "playlist.m3u8"
-	outputDir       = "output"
-)
-
-func Run() {
+func Run(inputFile string, outputDir string, playlistName string, segmentDuration int) {
 	// Check if FFmpeg is installed
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		log.Fatal("FFmpeg not found. Please install FFmpeg to continue.")
 	}
-
-	// Get the input video file from command line arguments
-	if len(os.Args) < 2 {
-		log.Fatal("Please provide the input video file path as an argument.")
-	}
-	inputFile := os.Args[1]
 
 	// Create output directory if it doesn't exist
 	if err := os.MkdirAll(outputDir, os.ModePerm); err != nil {
@@ -44,7 +31,7 @@ func Run() {
 	}
 
 	// Generate the FFmpeg command for HLS segmentation
-	cmd := generateFFmpegCommand(inputFile)
+	cmd := generateFFmpegCommand(inputFile, outputDir, playlistName, segmentDuration)
 
 	// Create a pipe to capture FFmpeg output
 	stderr, err := cmd.StderrPipe()
@@ -100,7 +87,7 @@ func getVideoDuration(inputFile string) (time.Duration, error) {
 }
 
 // generateFFmpegCommand creates the FFmpeg command for HLS segmentation
-func generateFFmpegCommand(inputFile string) *exec.Cmd {
+func generateFFmpegCommand(inputFile string, outputDir string, playlistName string, segmentDuration int) *exec.Cmd {
 	outputPath := filepath.Join(outputDir, "segment_%03d.ts")
 	playlistPath := filepath.Join(outputDir, playlistName)
 

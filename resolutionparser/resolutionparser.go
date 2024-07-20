@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
+	"video_processor/constants"
 )
 
 func Run(inputFile string, outputPrefix string, resolutions []int) {
@@ -17,20 +19,32 @@ func Run(inputFile string, outputPrefix string, resolutions []int) {
 
 	log.Printf("Input video height: %d", inputHeight)
 
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, constants.MaxConcurrent)
+
 	for _, res := range resolutions {
 		if res >= inputHeight {
 			log.Printf("Skipping %dp resolution as it's higher than or equal to the input video height", res)
 			continue
 		}
 
-		outputFile := fmt.Sprintf("%s_%dp.mp4", outputPrefix, res)
-		err := segmentVideo(inputFile, outputFile, res)
-		if err != nil {
-			log.Printf("Error processing %dp resolution: %v", res, err)
-		} else {
-			log.Printf("Successfully created %dp segment", res)
-		}
+		wg.Add(1)
+		sem <- struct{}{} // Acquire semaphore
+		go func(res int) {
+			defer wg.Done()
+			defer func() { <-sem }() // Release the semaphore when done
+
+			outputFile := fmt.Sprintf("%s_%dp.mp4", outputPrefix, res)
+			err := segmentVideo(inputFile, outputFile, res)
+			if err != nil {
+				log.Printf("Error processing %dp resolution: %v", res, err)
+			} else {
+				log.Printf("Successfully created %dp segment", res)
+			}
+		}(res)
 	}
+
+	wg.Wait()
 }
 
 func getVideoHeight(input string) (int, error) {
