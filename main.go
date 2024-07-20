@@ -8,7 +8,7 @@ import (
 func main() {
 	fileName := "test"
 	outputDir := "output"
-	resolutions := []string{"480", "720", "1080"}
+	resolutions := []int{480, 720, 1080}
 	resolutionparser.Run(
 		fmt.Sprintf("%s.mp4", fileName),
 		fmt.Sprintf("%s/%s", outputDir, fileName),
