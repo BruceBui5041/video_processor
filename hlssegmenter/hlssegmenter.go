@@ -3,6 +3,7 @@ package hlssegmenter
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -12,98 +13,125 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"video_processor/constants"
-	"video_processor/utils"
 )
 
-func ExecHLSSegmentVideo(outputDir string) {
-	videoNames, err := utils.GetVideoNames(outputDir)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
-	}
-
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, constants.MaxConcurrent)
-
-	for _, name := range videoNames {
-		wg.Add(1)
-		sem <- struct{}{}
-
-		go func(name string) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			execSegmentCmd(
-				fmt.Sprintf("%s/%s", outputDir, name),
-				fmt.Sprintf("%s/output_segs/%s", outputDir, utils.RemoveFileExtension(name)),
-				"playlist.m3u8",
-				3,
-			)
-		}(name)
-	}
-
-	wg.Wait()
+type Resolution struct {
+	Width  int
+	Height int
+	Name   string
 }
 
-func execSegmentCmd(inputFile string, outputDir string, playlistName string, segmentDuration int) {
-	// Check if FFmpeg is installed
+var resolutions = []Resolution{
+	{Width: 1920, Height: 1080, Name: "1080p"},
+	{Width: 1280, Height: 720, Name: "720p"},
+	{Width: 854, Height: 480, Name: "480p"},
+	{Width: 640, Height: 360, Name: "360p"},
+}
+
+const maxConcurrentProcesses = 4
+
+func ExecHLSSegmentVideo(inputFile, outputDir string) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		log.Fatal("FFmpeg not found. Please install FFmpeg to continue.")
 	}
 
-	// Create output directory if it doesn't exist
 	if err := os.MkdirAll(outputDir, os.ModePerm); err != nil {
 		log.Fatalf("Failed to create output directory: %v", err)
 	}
 
-	// Get video duration
 	duration, err := getVideoDuration(inputFile)
 	if err != nil {
 		log.Fatalf("Failed to get video duration: %v", err)
 	}
 
-	// Generate the FFmpeg command for HLS segmentation
-	cmd := generateFFmpegCommand(inputFile, outputDir, playlistName, segmentDuration)
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxConcurrentProcesses)
+	var variantPlaylists []string
+	var mu sync.Mutex
 
-	// Create a pipe to capture FFmpeg output
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		log.Fatalf("Failed to create stderr pipe: %v", err)
-	}
+	for _, res := range resolutions {
+		wg.Add(1)
+		go func(res Resolution) {
+			defer wg.Done()
+			sem <- struct{}{}        // Acquire semaphore
+			defer func() { <-sem }() // Release semaphore
 
-	// Start the FFmpeg command
-	if err := cmd.Start(); err != nil {
-		log.Fatalf("Failed to start FFmpeg: %v", err)
-	}
-
-	// Start a goroutine to read FFmpeg output and update progress
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		re := regexp.MustCompile(`time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})`)
-		for scanner.Scan() {
-			line := scanner.Text()
-			matches := re.FindStringSubmatch(line)
-			if len(matches) == 5 {
-				hours, _ := strconv.Atoi(matches[1])
-				minutes, _ := strconv.Atoi(matches[2])
-				seconds, _ := strconv.Atoi(matches[3])
-				processedDuration := time.Duration(hours)*time.Hour + time.Duration(minutes)*time.Minute + time.Duration(seconds)*time.Second
-				progress := float64(processedDuration) / float64(duration) * 100
-				fmt.Printf("\rProgress: %.2f%%", progress)
+			resolutionDir := filepath.Join(outputDir, res.Name)
+			if err := os.MkdirAll(resolutionDir, os.ModePerm); err != nil {
+				log.Printf("Failed to create resolution directory for %s: %v", res.Name, err)
+				return
 			}
-		}
-	}()
 
-	// Wait for FFmpeg to finish
-	if err := cmd.Wait(); err != nil {
-		log.Fatalf("FFmpeg command failed: %v", err)
+			playlistName := fmt.Sprintf("playlist_%s.m3u8", res.Name)
+			cmd := generateFFmpegCommand(inputFile, resolutionDir, playlistName, 3, res)
+
+			stderr, err := cmd.StderrPipe()
+			if err != nil {
+				log.Printf("Failed to create stderr pipe for %s: %v", res.Name, err)
+				return
+			}
+
+			if err := cmd.Start(); err != nil {
+				log.Printf("Failed to start FFmpeg for %s: %v", res.Name, err)
+				return
+			}
+
+			go monitorProgress(stderr, duration, res.Name)
+
+			if err := cmd.Wait(); err != nil {
+				log.Printf("FFmpeg command failed for %s: %v", res.Name, err)
+				return
+			}
+
+			mu.Lock()
+			variantPlaylists = append(variantPlaylists, playlistName)
+			mu.Unlock()
+
+			fmt.Printf("\nHLS segmentation completed for %s.\n", res.Name)
+		}(res)
 	}
 
-	fmt.Println("\nHLS segmentation completed successfully.")
+	wg.Wait()
+
+	generateMasterPlaylist(outputDir, variantPlaylists)
+
+	fmt.Printf("\nHLS segmentation completed successfully for all resolutions.\n")
 	fmt.Printf("Output files are in the '%s' directory.\n", outputDir)
 }
 
-// getVideoDuration returns the duration of the input video file
+func generateMasterPlaylist(outputDir string, variantPlaylists []string) {
+	masterPlaylistPath := filepath.Join(outputDir, "master.m3u8")
+	f, err := os.Create(masterPlaylistPath)
+	if err != nil {
+		log.Fatalf("Failed to create master playlist: %v", err)
+	}
+	defer f.Close()
+
+	f.WriteString("#EXTM3U\n")
+	f.WriteString("#EXT-X-VERSION:3\n")
+
+	for i, playlist := range variantPlaylists {
+		res := resolutions[i]
+		f.WriteString(fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d\n", getBandwidth(res), res.Width, res.Height))
+		f.WriteString(fmt.Sprintf("%s/%s\n", res.Name, playlist))
+	}
+}
+
+func getBandwidth(res Resolution) int {
+	switch res.Name {
+	case "1080p":
+		return 5000000
+	case "720p":
+		return 2800000
+	case "480p":
+		return 1400000
+	case "360p":
+		return 800000
+	default:
+		return 400000
+	}
+}
+
 func getVideoDuration(inputFile string) (time.Duration, error) {
 	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", inputFile)
 	output, err := cmd.Output()
@@ -118,30 +146,45 @@ func getVideoDuration(inputFile string) (time.Duration, error) {
 	return time.Duration(durationSec * float64(time.Second)), nil
 }
 
-// generateFFmpegCommand creates the FFmpeg command for HLS segmentation
-func generateFFmpegCommand(inputFile string, outputDir string, playlistName string, segmentDuration int) *exec.Cmd {
+func generateFFmpegCommand(inputFile, outputDir, playlistName string, segmentDuration int, res Resolution) *exec.Cmd {
 	outputPath := filepath.Join(outputDir, "segment_%03d.ts")
 	playlistPath := filepath.Join(outputDir, playlistName)
 
-	// Construct the FFmpeg command
 	args := []string{
-		"-i", inputFile, // Input file
-		"-profile:v", "baseline", // Use baseline profile for better device compatibility
-		"-level", "3.0", // Set H.264 level
-		"-start_number", "0", // Start segment numbering at 0
-		"-hls_time", fmt.Sprintf("%d", segmentDuration), // Set segment duration
-		"-hls_list_size", "0", // Keep all segments in the playlist
-		"-f", "hls", // Force HLS output format
-		"-hls_segment_filename", outputPath, // Set output segment file pattern
-		playlistPath, // Set the output playlist file
+		"-i", inputFile,
+		"-profile:v", "main",
+		"-level", "3.1",
+		"-start_number", "0",
+		"-hls_time", fmt.Sprintf("%d", segmentDuration),
+		"-hls_list_size", "0",
+		"-f", "hls",
+		"-vf", fmt.Sprintf("scale=%d:%d", res.Width, res.Height),
+		"-c:a", "aac",
+		"-ar", "48000",
+		"-b:a", "128k",
+		"-hls_segment_filename", outputPath,
+		playlistPath,
 	}
 
-	// Create the command
 	cmd := exec.Command("ffmpeg", args...)
-
-	// Print the command for debugging
 	fmt.Println("Executing FFmpeg command:")
 	fmt.Println(strings.Join(cmd.Args, " "))
-
 	return cmd
+}
+
+func monitorProgress(stderr io.ReadCloser, duration time.Duration, resName string) {
+	scanner := bufio.NewScanner(stderr)
+	re := regexp.MustCompile(`time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})`)
+	for scanner.Scan() {
+		line := scanner.Text()
+		matches := re.FindStringSubmatch(line)
+		if len(matches) == 5 {
+			hours, _ := strconv.Atoi(matches[1])
+			minutes, _ := strconv.Atoi(matches[2])
+			seconds, _ := strconv.Atoi(matches[3])
+			processedDuration := time.Duration(hours)*time.Hour + time.Duration(minutes)*time.Minute + time.Duration(seconds)*time.Second
+			progress := float64(processedDuration) / float64(duration) * 100
+			fmt.Printf("\rProgress (%s): %.2f%%", resName, progress)
+		}
+	}
 }
