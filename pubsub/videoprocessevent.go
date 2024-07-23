@@ -47,7 +47,7 @@ func processMessage(msg *message.Message) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			err := storagehandler.UploadFileToS3(path, constants.AWSVideoS3BuckerName, constants.AWSRegion)
+			err := storagehandler.UploadFileToS3(path, constants.AWSVideoS3BuckerName)
 			if err != nil {
 				log.Print(err.Error())
 			}

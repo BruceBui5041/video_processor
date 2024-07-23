@@ -86,3 +86,39 @@ func CreateDirIfNotExist(path string) error {
 	}
 	return nil
 }
+
+func DeleteLocalFile(path string) error {
+	err := os.Remove(path)
+	if err != nil {
+		return fmt.Errorf("failed to delete file %s: %v", path, err)
+	}
+	fmt.Printf("Successfully deleted file: %s\n", path)
+	return nil
+}
+
+func DeleteDirContents(dirPath string) error {
+	// Read the directory
+	dir, err := os.Open(dirPath)
+	if err != nil {
+		return fmt.Errorf("failed to open directory %s: %v", dirPath, err)
+	}
+	defer dir.Close()
+
+	// Get all the files and directories in the given path
+	entries, err := dir.Readdirnames(-1)
+	if err != nil {
+		return fmt.Errorf("failed to read directory contents of %s: %v", dirPath, err)
+	}
+
+	// Iterate over each entry and remove it
+	for _, entry := range entries {
+		fullPath := filepath.Join(dirPath, entry)
+		err = os.RemoveAll(fullPath)
+		if err != nil {
+			return fmt.Errorf("failed to remove %s: %v", fullPath, err)
+		}
+	}
+
+	fmt.Printf("Successfully deleted all contents of directory: %s\n", dirPath)
+	return nil
+}

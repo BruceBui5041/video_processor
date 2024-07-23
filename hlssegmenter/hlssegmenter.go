@@ -2,6 +2,7 @@ package hlssegmenter
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -68,7 +69,11 @@ func ExecHLSSegmentVideo(inputFile, outputDir string) {
 			}
 
 			playlistName := fmt.Sprintf("playlist_%s.m3u8", res.Name)
-			cmd := generateFFmpegCommand(inputFile, resolutionDir, playlistName, 3, res)
+			cmd, err := generateFFmpegCommand(inputFile, resolutionDir, playlistName, 3, res)
+			if err != nil {
+				log.Printf("Failed to generate or run FFmpeg command for %s: %v", res.Name, err)
+				return
+			}
 
 			stderr, err := cmd.StderrPipe()
 			if err != nil {
@@ -157,7 +162,7 @@ func getVideoDuration(inputFile string) (time.Duration, error) {
 	return time.Duration(durationSec * float64(time.Second)), nil
 }
 
-func generateFFmpegCommand(inputFile, outputDir, playlistName string, segmentDuration int, res Resolution) *exec.Cmd {
+func generateFFmpegCommand(inputFile, outputDir, playlistName string, segmentDuration int, res Resolution) (*exec.Cmd, error) {
 	outputPath := filepath.Join(outputDir, "segment_%03d.ts")
 	playlistPath := filepath.Join(outputDir, playlistName)
 
@@ -173,14 +178,29 @@ func generateFFmpegCommand(inputFile, outputDir, playlistName string, segmentDur
 		"-c:a", "aac",
 		"-ar", "48000",
 		"-b:a", "128k",
+		"-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d)", segmentDuration),
+		"-hls_flags", "split_by_time+independent_segments",
+		"-hls_segment_type", "mpegts",
 		"-hls_segment_filename", outputPath,
 		playlistPath,
 	}
 
 	cmd := exec.Command("ffmpeg", args...)
+
+	// Capture both stdout and stderr
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
 	fmt.Println("Executing FFmpeg command:")
 	fmt.Println(strings.Join(cmd.Args, " "))
-	return cmd
+
+	err := cmd.Run()
+	if err != nil {
+		return nil, fmt.Errorf("FFmpeg command failed: %v\nStdout: %s\nStderr: %s", err, stdout.String(), stderr.String())
+	}
+
+	return cmd, nil
 }
 
 func monitorProgress(stderr io.ReadCloser, duration time.Duration, resName string) {
