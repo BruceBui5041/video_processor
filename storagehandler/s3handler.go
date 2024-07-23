@@ -1,32 +1,50 @@
 package storagehandler
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"video_processor/constants"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/joho/godotenv"
 )
 
-var AWSSession *session.Session
+var awsConfig aws.Config
 
 func init() {
-	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String(constants.AWSRegion),
-	})
-	if err != nil {
-		panic(err)
+	// Load the .env file
+	if err := godotenv.Load(); err != nil {
+		log.Fatal("Error loading .env file")
 	}
 
-	AWSSession = sess
+	// Get credentials from environment variables
+	accessKeyID := os.Getenv("AWS_ACCESS_KEY_ID")
+	secretAccessKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
+
+	// Create a new credential provider
+	creds := credentials.NewStaticCredentialsProvider(accessKeyID, secretAccessKey, "")
+
+	// Load the configuration
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithRegion(constants.AWSRegion),
+		config.WithCredentialsProvider(creds),
+	)
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
+	}
+
+	awsConfig = cfg
 }
 
 func UploadFileToS3(inputFilePath, bucketName string) error {
-	svc := s3.New(AWSSession)
+	client := s3.NewFromConfig(awsConfig)
 
 	file, err := os.Open(inputFilePath)
 	if err != nil {
@@ -37,15 +55,12 @@ func UploadFileToS3(inputFilePath, bucketName string) error {
 	// Get the file name from the input path
 	fileName := filepath.Base(inputFilePath)
 
-	// Create the input for PutObject
-	input := &s3.PutObjectInput{
+	// Upload the file to S3
+	_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket: aws.String(bucketName),
 		Key:    aws.String(inputFilePath),
 		Body:   file,
-	}
-
-	// Upload the file to S3
-	_, err = svc.PutObject(input)
+	})
 	if err != nil {
 		return fmt.Errorf("error uploading file to S3: %w", err)
 	}
@@ -55,17 +70,13 @@ func UploadFileToS3(inputFilePath, bucketName string) error {
 }
 
 func GetS3File(bucket, key, saveDir string) (string, error) {
-	// Create an S3 service client
-	svc := s3.New(AWSSession)
-
-	// Create the GetObject request
-	input := &s3.GetObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
-	}
+	client := s3.NewFromConfig(awsConfig)
 
 	// Fetch the object
-	result, err := svc.GetObject(input)
+	result, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to get object: %v", err)
 	}

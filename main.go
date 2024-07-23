@@ -8,12 +8,19 @@ import (
 	"video_processor/pubsub"
 	"video_processor/storagehandler"
 	"video_processor/utils"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
 	fileName := "test.mp4"
 	outputDir := "segments"
 	unprecessedVideoDir := "unprocessed_video"
+
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
 
 	// Start the subscriber in a goroutine
 	go pubsub.SubscribeToVideoProcessed()

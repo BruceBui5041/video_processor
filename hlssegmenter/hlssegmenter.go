@@ -2,8 +2,8 @@ package hlssegmenter
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -34,6 +34,7 @@ var resolutions = []Resolution{
 }
 
 const maxConcurrentProcesses = 4
+const videoSegmentDuration = 3
 
 func ExecHLSSegmentVideo(inputFile, outputDir string) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
@@ -68,16 +69,17 @@ func ExecHLSSegmentVideo(inputFile, outputDir string) {
 			}
 
 			playlistName := fmt.Sprintf("playlist_%s.m3u8", res.Name)
-			cmd, err := generateFFmpegCommand(inputFile, resolutionDir, playlistName, 3, res)
+			cmd, err := generateFFmpegCommand(inputFile, resolutionDir, playlistName, videoSegmentDuration, res)
 			if err != nil {
 				log.Printf("Failed to generate FFmpeg command for %s: %v", res.Name, err)
 				return
 			}
 
-			fmt.Printf("Generated FFmpeg command for %s:\n%s\n", res.Name, strings.Join(cmd.Args, " "))
-
-			var stderr bytes.Buffer
-			cmd.Stderr = &stderr
+			stderrPipe, err := cmd.StderrPipe()
+			if err != nil {
+				log.Printf("Failed to create stderr pipe for %s: %v", res.Name, err)
+				return
+			}
 
 			fmt.Printf("Starting FFmpeg for %s\n", res.Name)
 
@@ -86,14 +88,14 @@ func ExecHLSSegmentVideo(inputFile, outputDir string) {
 				return
 			}
 
-			go monitorProgress(&stderr, duration, res.Name)
+			go monitorProgress(stderrPipe, duration, res.Name)
 
 			if err := cmd.Wait(); err != nil {
-				log.Printf("FFmpeg command failed for %s: %v\nError output:\n%s", res.Name, err, stderr.String())
+				log.Printf("FFmpeg command failed for %s: %v", res.Name, err)
 				return
 			}
 
-			fmt.Printf("FFmpeg completed successfully for %s\n", res.Name)
+			fmt.Printf("\nFFmpeg completed successfully for %s\n", res.Name)
 
 			mu.Lock()
 			variantPlaylists[i] = playlistName
@@ -206,7 +208,7 @@ func generateFFmpegCommand(inputFile, outputDir, playlistName string, segmentDur
 	return cmd, nil
 }
 
-func monitorProgress(stderr *bytes.Buffer, duration time.Duration, resName string) {
+func monitorProgress(stderr io.Reader, duration time.Duration, resName string) {
 	scanner := bufio.NewScanner(stderr)
 	re := regexp.MustCompile(`time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})`)
 	for scanner.Scan() {
@@ -219,6 +221,9 @@ func monitorProgress(stderr *bytes.Buffer, duration time.Duration, resName strin
 			processedDuration := time.Duration(hours)*time.Hour + time.Duration(minutes)*time.Minute + time.Duration(seconds)*time.Second
 			progress := float64(processedDuration) / float64(duration) * 100
 			fmt.Printf("\rProgress (%s): %.2f%%", resName, progress)
+			// Flush the output to ensure it's displayed immediately
+			fmt.Print("\033[?25l") // Hide cursor
 		}
 	}
+	fmt.Print("\033[?25h") // Show cursor
 }
