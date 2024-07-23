@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -52,15 +51,15 @@ func ExecHLSSegmentVideo(inputFile, outputDir string) {
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, maxConcurrentProcesses)
-	var variantPlaylists []string
+	variantPlaylists := make([]string, len(resolutions))
 	var mu sync.Mutex
 
-	for _, res := range resolutions {
+	for i, res := range resolutions {
 		wg.Add(1)
-		go func(res Resolution) {
+		go func(i int, res Resolution) {
 			defer wg.Done()
-			sem <- struct{}{}        // Acquire semaphore
-			defer func() { <-sem }() // Release semaphore
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
 			resolutionDir := filepath.Join(outputDir, res.Name)
 			if err := os.MkdirAll(resolutionDir, os.ModePerm); err != nil {
@@ -71,37 +70,46 @@ func ExecHLSSegmentVideo(inputFile, outputDir string) {
 			playlistName := fmt.Sprintf("playlist_%s.m3u8", res.Name)
 			cmd, err := generateFFmpegCommand(inputFile, resolutionDir, playlistName, 3, res)
 			if err != nil {
-				log.Printf("Failed to generate or run FFmpeg command for %s: %v", res.Name, err)
+				log.Printf("Failed to generate FFmpeg command for %s: %v", res.Name, err)
 				return
 			}
 
-			stderr, err := cmd.StderrPipe()
-			if err != nil {
-				log.Printf("Failed to create stderr pipe for %s: %v", res.Name, err)
-				return
-			}
+			fmt.Printf("Generated FFmpeg command for %s:\n%s\n", res.Name, strings.Join(cmd.Args, " "))
+
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+
+			fmt.Printf("Starting FFmpeg for %s\n", res.Name)
 
 			if err := cmd.Start(); err != nil {
 				log.Printf("Failed to start FFmpeg for %s: %v", res.Name, err)
 				return
 			}
 
-			go monitorProgress(stderr, duration, res.Name)
+			go monitorProgress(&stderr, duration, res.Name)
 
 			if err := cmd.Wait(); err != nil {
-				log.Printf("FFmpeg command failed for %s: %v", res.Name, err)
+				log.Printf("FFmpeg command failed for %s: %v\nError output:\n%s", res.Name, err, stderr.String())
 				return
 			}
 
+			fmt.Printf("FFmpeg completed successfully for %s\n", res.Name)
+
 			mu.Lock()
-			variantPlaylists = append(variantPlaylists, playlistName)
+			variantPlaylists[i] = playlistName
+			fmt.Printf("Added playlist for %s at index %d: %s\n", res.Name, i, playlistName)
 			mu.Unlock()
 
-			fmt.Printf("\nHLS segmentation completed for %s.\n", res.Name)
-		}(res)
+			fmt.Printf("HLS segmentation completed for %s.\n", res.Name)
+		}(i, res)
 	}
 
 	wg.Wait()
+
+	fmt.Println("Final variant playlists:")
+	for i, playlist := range variantPlaylists {
+		fmt.Printf("Index %d: %s\n", i, playlist)
+	}
 
 	generateMasterPlaylist(outputDir, variantPlaylists)
 
@@ -116,6 +124,8 @@ func ExecHLSSegmentVideo(inputFile, outputDir string) {
 }
 
 func generateMasterPlaylist(outputDir string, variantPlaylists []string) {
+	fmt.Println("Generating master playlist with:", variantPlaylists)
+
 	masterPlaylistPath := filepath.Join(outputDir, "master.m3u8")
 	f, err := os.Create(masterPlaylistPath)
 	if err != nil {
@@ -127,9 +137,15 @@ func generateMasterPlaylist(outputDir string, variantPlaylists []string) {
 	f.WriteString("#EXT-X-VERSION:3\n")
 
 	for i, playlist := range variantPlaylists {
+		if playlist == "" {
+			fmt.Printf("Empty playlist at index %d\n", i)
+			continue
+		}
 		res := resolutions[i]
-		f.WriteString(fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d\n", getBandwidth(res), res.Width, res.Height))
-		f.WriteString(fmt.Sprintf("%s/%s\n", res.Name, playlist))
+		entry := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d\n%s/%s\n",
+			getBandwidth(res), res.Width, res.Height, res.Name, playlist)
+		f.WriteString(entry)
+		fmt.Printf("Added to master playlist: %s", entry)
 	}
 }
 
@@ -187,23 +203,10 @@ func generateFFmpegCommand(inputFile, outputDir, playlistName string, segmentDur
 
 	cmd := exec.Command("ffmpeg", args...)
 
-	// Capture both stdout and stderr
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	fmt.Println("Executing FFmpeg command:")
-	fmt.Println(strings.Join(cmd.Args, " "))
-
-	err := cmd.Run()
-	if err != nil {
-		return nil, fmt.Errorf("FFmpeg command failed: %v\nStdout: %s\nStderr: %s", err, stdout.String(), stderr.String())
-	}
-
 	return cmd, nil
 }
 
-func monitorProgress(stderr io.ReadCloser, duration time.Duration, resName string) {
+func monitorProgress(stderr *bytes.Buffer, duration time.Duration, resName string) {
 	scanner := bufio.NewScanner(stderr)
 	re := regexp.MustCompile(`time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})`)
 	for scanner.Scan() {
