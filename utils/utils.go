@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -49,4 +50,39 @@ func RemoveFileExtension(filename string) string {
 
 	// Return the part of the string before the last dot
 	return base[:dotIndex]
+}
+
+func GetFilePaths(dirPath string) ([]string, error) {
+	var filePaths []string
+
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			filePaths = append(filePaths, path)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("error walking through directory: %v", err)
+	}
+
+	return filePaths, nil
+}
+
+func CreateDirIfNotExist(path string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		err := os.MkdirAll(path, 0755)
+		if err != nil {
+			return fmt.Errorf("failed to create directory: %v", err)
+		}
+		fmt.Printf("Directory created successfully: %s\n", path)
+	} else if err != nil {
+		return fmt.Errorf("error checking directory: %v", err)
+	} else {
+		fmt.Printf("Directory already exists: %s\n", path)
+	}
+	return nil
 }

@@ -20,7 +20,7 @@ func Run(inputFile string, outputPrefix string, resolutions []int) {
 	log.Printf("Input video height: %d", inputHeight)
 
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, constants.MaxConcurrent)
+	sem := make(chan struct{}, constants.VideoMaxConcurrentResolutionParse)
 
 	for _, res := range resolutions {
 		if res >= inputHeight {

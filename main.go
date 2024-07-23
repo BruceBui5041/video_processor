@@ -2,20 +2,24 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 	"video_processor/hlssegmenter"
+	"video_processor/pubsub"
+	"video_processor/utils"
 )
 
 func main() {
 	fileName := "test.mp4"
-	outputDir := "output"
-	// resolutions := []int{480, 720, 1080}
+	outputDir := "segments"
 
-	// resolutionparser.Run(
-	// 	fileName,
-	// 	fmt.Sprintf("%s/%s", outputDir, fileName),
-	// 	resolutions,
-	// )
+	// Start the subscriber in a goroutine
+	go pubsub.SubscribeToVideoProcessed()
 
-	hlssegmenter.ExecHLSSegmentVideo(fileName, outputDir)
+	desireOutputPath := filepath.Join(outputDir, fileName)
+	utils.CreateDirIfNotExist(desireOutputPath)
+	hlssegmenter.ExecHLSSegmentVideo(fileName, desireOutputPath)
+
 	fmt.Println("All videos processed.")
+
+	select {}
 }

@@ -13,6 +13,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"video_processor/constants"
+	"video_processor/pubsub"
+
+	"github.com/ThreeDotsLabs/watermill"
+	"github.com/ThreeDotsLabs/watermill/message"
 )
 
 type Resolution struct {
@@ -97,6 +102,12 @@ func ExecHLSSegmentVideo(inputFile, outputDir string) {
 
 	fmt.Printf("\nHLS segmentation completed successfully for all resolutions.\n")
 	fmt.Printf("Output files are in the '%s' directory.\n", outputDir)
+
+	// Publish event when processing is complete
+	msg := message.NewMessage(watermill.NewUUID(), []byte(fmt.Sprintf("%s,%s", inputFile, outputDir)))
+	if err := pubsub.Publisher.Publish(constants.TopicVideoProcessed, msg); err != nil {
+		log.Printf("Failed to publish video_processed event: %v", err)
+	}
 }
 
 func generateMasterPlaylist(outputDir string, variantPlaylists []string) {
