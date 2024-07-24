@@ -2,27 +2,28 @@ package utils
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"video_processor/logger"
+
+	"go.uber.org/zap"
 )
 
 func GetVideoNames(folderPath string) ([]string, error) {
-	// This command finds files with common video extensions
 	cmd := exec.Command("find", folderPath, "-type", "f", "-name", "*.mp4", "-o", "-name", "*.avi", "-o", "-name", "*.mkv", "-o", "-name", "*.mov")
 
 	output, err := cmd.Output()
 	if err != nil {
-		// Log the full error, including any output from the command
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			log.Printf("Command failed with exit code %d. Stderr: %s", exitErr.ExitCode(), string(exitErr.Stderr))
+			logger.AppLogger.Error("Command failed",
+				zap.Int("exitCode", exitErr.ExitCode()),
+				zap.String("stderr", string(exitErr.Stderr)))
 		}
 		return nil, fmt.Errorf("error executing command: %v", err)
 	}
 
-	// Split the output into lines and extract file names
 	files := strings.Split(strings.TrimSpace(string(output)), "\n")
 	var videoNames []string
 	for _, file := range files {
@@ -36,19 +37,11 @@ func GetVideoNames(folderPath string) ([]string, error) {
 }
 
 func RemoveFileExtension(filename string) string {
-	// Get the base name of the file (in case it includes a path)
 	base := filepath.Base(filename)
-
-	// Find the last occurrence of the dot
 	dotIndex := strings.LastIndex(base, ".")
-
-	// If there's no dot, or it's the first character (hidden files in Unix),
-	// return the original filename
 	if dotIndex <= 0 {
 		return base
 	}
-
-	// Return the part of the string before the last dot
 	return base[:dotIndex]
 }
 
@@ -66,6 +59,7 @@ func GetFilePaths(dirPath string) ([]string, error) {
 	})
 
 	if err != nil {
+		logger.AppLogger.Error("Error walking through directory", zap.Error(err), zap.String("directory", dirPath))
 		return nil, fmt.Errorf("error walking through directory: %v", err)
 	}
 
@@ -76,13 +70,15 @@ func CreateDirIfNotExist(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		err := os.MkdirAll(path, 0755)
 		if err != nil {
+			logger.AppLogger.Error("Failed to create directory", zap.Error(err), zap.String("path", path))
 			return fmt.Errorf("failed to create directory: %v", err)
 		}
-		fmt.Printf("Directory created successfully: %s\n", path)
+		logger.AppLogger.Info("Directory created successfully", zap.String("path", path))
 	} else if err != nil {
+		logger.AppLogger.Error("Error checking directory", zap.Error(err), zap.String("path", path))
 		return fmt.Errorf("error checking directory: %v", err)
 	} else {
-		fmt.Printf("Directory already exists: %s\n", path)
+		logger.AppLogger.Info("Directory already exists", zap.String("path", path))
 	}
 	return nil
 }
@@ -90,35 +86,36 @@ func CreateDirIfNotExist(path string) error {
 func DeleteLocalFile(path string) error {
 	err := os.Remove(path)
 	if err != nil {
+		logger.AppLogger.Error("Failed to delete file", zap.Error(err), zap.String("path", path))
 		return fmt.Errorf("failed to delete file %s: %v", path, err)
 	}
-	fmt.Printf("Successfully deleted file: %s\n", path)
+	logger.AppLogger.Info("Successfully deleted file", zap.String("path", path))
 	return nil
 }
 
 func DeleteDirContents(dirPath string) error {
-	// Read the directory
 	dir, err := os.Open(dirPath)
 	if err != nil {
+		logger.AppLogger.Error("Failed to open directory", zap.Error(err), zap.String("path", dirPath))
 		return fmt.Errorf("failed to open directory %s: %v", dirPath, err)
 	}
 	defer dir.Close()
 
-	// Get all the files and directories in the given path
 	entries, err := dir.Readdirnames(-1)
 	if err != nil {
+		logger.AppLogger.Error("Failed to read directory contents", zap.Error(err), zap.String("path", dirPath))
 		return fmt.Errorf("failed to read directory contents of %s: %v", dirPath, err)
 	}
 
-	// Iterate over each entry and remove it
 	for _, entry := range entries {
 		fullPath := filepath.Join(dirPath, entry)
 		err = os.RemoveAll(fullPath)
 		if err != nil {
+			logger.AppLogger.Error("Failed to remove item", zap.Error(err), zap.String("path", fullPath))
 			return fmt.Errorf("failed to remove %s: %v", fullPath, err)
 		}
 	}
 
-	fmt.Printf("Successfully deleted all contents of directory: %s\n", dirPath)
+	logger.AppLogger.Info("Successfully deleted all contents of directory", zap.String("path", dirPath))
 	return nil
 }

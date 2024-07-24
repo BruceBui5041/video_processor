@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,12 +13,14 @@ import (
 	"sync"
 	"time"
 	"video_processor/appconst"
+	"video_processor/logger"
 	"video_processor/pubsub"
 	"video_processor/storagehandler"
 	"video_processor/utils"
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
+	"go.uber.org/zap"
 )
 
 type Resolution struct {
@@ -46,7 +47,7 @@ func StartSegmentProcess(inputFile, outputDir string) {
 		appconst.UnprecessedVideoDir,
 	)
 	if err != nil {
-		log.Fatal(err.Error())
+		logger.AppLogger.Fatal("Failed to get S3 file", zap.Error(err), zap.String("inputFile", inputFile))
 	}
 
 	desireOutputPath := filepath.Join(outputDir, inputFile)
@@ -56,16 +57,16 @@ func StartSegmentProcess(inputFile, outputDir string) {
 
 func HLSSegmentVideo(inputFile, outputDir string) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		log.Fatal("FFmpeg not found. Please install FFmpeg to continue.")
+		logger.AppLogger.Fatal("FFmpeg not found. Please install FFmpeg to continue.", zap.Error(err))
 	}
 
 	if err := os.MkdirAll(outputDir, os.ModePerm); err != nil {
-		log.Fatalf("Failed to create output directory: %v", err)
+		logger.AppLogger.Fatal("Failed to create output directory", zap.Error(err), zap.String("outputDir", outputDir))
 	}
 
 	duration, err := getVideoDuration(inputFile)
 	if err != nil {
-		log.Fatalf("Failed to get video duration: %v", err)
+		logger.AppLogger.Fatal("Failed to get video duration", zap.Error(err), zap.String("inputFile", inputFile))
 	}
 
 	var wg sync.WaitGroup
@@ -82,74 +83,87 @@ func HLSSegmentVideo(inputFile, outputDir string) {
 
 			resolutionDir := filepath.Join(outputDir, res.Name)
 			if err := os.MkdirAll(resolutionDir, os.ModePerm); err != nil {
-				log.Printf("Failed to create resolution directory for %s: %v", res.Name, err)
+				logger.AppLogger.Error("Failed to create resolution directory",
+					zap.Error(err),
+					zap.String("resolution", res.Name),
+					zap.String("dir", resolutionDir))
 				return
 			}
 
 			playlistName := fmt.Sprintf("playlist_%s.m3u8", res.Name)
 			cmd, err := generateFFmpegCommand(inputFile, resolutionDir, playlistName, videoSegmentDuration, res)
 			if err != nil {
-				log.Printf("Failed to generate FFmpeg command for %s: %v", res.Name, err)
+				logger.AppLogger.Error("Failed to generate FFmpeg command",
+					zap.Error(err),
+					zap.String("resolution", res.Name))
 				return
 			}
 
 			stderrPipe, err := cmd.StderrPipe()
 			if err != nil {
-				log.Printf("Failed to create stderr pipe for %s: %v", res.Name, err)
+				logger.AppLogger.Error("Failed to create stderr pipe",
+					zap.Error(err),
+					zap.String("resolution", res.Name))
 				return
 			}
 
-			fmt.Printf("Starting FFmpeg for %s\n", res.Name)
+			logger.AppLogger.Info("Starting FFmpeg", zap.String("resolution", res.Name))
 
 			if err := cmd.Start(); err != nil {
-				log.Printf("Failed to start FFmpeg for %s: %v", res.Name, err)
+				logger.AppLogger.Error("Failed to start FFmpeg",
+					zap.Error(err),
+					zap.String("resolution", res.Name))
 				return
 			}
 
 			go monitorProgress(stderrPipe, duration, res.Name)
 
 			if err := cmd.Wait(); err != nil {
-				log.Printf("FFmpeg command failed for %s: %v", res.Name, err)
+				logger.AppLogger.Error("FFmpeg command failed",
+					zap.Error(err),
+					zap.String("resolution", res.Name))
 				return
 			}
 
-			fmt.Printf("\nFFmpeg completed successfully for %s\n", res.Name)
+			logger.AppLogger.Info("FFmpeg completed successfully", zap.String("resolution", res.Name))
 
 			mu.Lock()
 			variantPlaylists[i] = playlistName
-			fmt.Printf("Added playlist for %s at index %d: %s\n", res.Name, i, playlistName)
+			logger.AppLogger.Info("Added playlist",
+				zap.String("resolution", res.Name),
+				zap.Int("index", i),
+				zap.String("playlist", playlistName))
 			mu.Unlock()
 
-			fmt.Printf("HLS segmentation completed for %s.\n", res.Name)
+			logger.AppLogger.Info("HLS segmentation completed", zap.String("resolution", res.Name))
 		}(i, res)
 	}
 
 	wg.Wait()
 
-	fmt.Println("Final variant playlists:")
-	for i, playlist := range variantPlaylists {
-		fmt.Printf("Index %d: %s\n", i, playlist)
-	}
+	logger.AppLogger.Info("Final variant playlists", zap.Strings("playlists", variantPlaylists))
 
 	generateMasterPlaylist(outputDir, variantPlaylists)
 
-	fmt.Printf("\nHLS segmentation completed successfully for all resolutions.\n")
-	fmt.Printf("Output files are in the '%s' directory.\n", outputDir)
+	logger.AppLogger.Info("HLS segmentation completed successfully for all resolutions",
+		zap.String("outputDir", outputDir))
 
 	// Publish event when processing is complete
 	msg := message.NewMessage(watermill.NewUUID(), []byte(fmt.Sprintf("%s,%s", inputFile, outputDir)))
 	if err := pubsub.Publisher.Publish(appconst.TopicVideoProcessed, msg); err != nil {
-		log.Printf("Failed to publish video_processed event: %v", err)
+		logger.AppLogger.Error("Failed to publish video_processed event", zap.Error(err))
 	}
 }
 
 func generateMasterPlaylist(outputDir string, variantPlaylists []string) {
-	fmt.Println("Generating master playlist with:", variantPlaylists)
+	logger.AppLogger.Info("Generating master playlist", zap.Strings("variantPlaylists", variantPlaylists))
 
 	masterPlaylistPath := filepath.Join(outputDir, "master.m3u8")
 	f, err := os.Create(masterPlaylistPath)
 	if err != nil {
-		log.Fatalf("Failed to create master playlist: %v", err)
+		logger.AppLogger.Fatal("Failed to create master playlist",
+			zap.Error(err),
+			zap.String("path", masterPlaylistPath))
 	}
 	defer f.Close()
 
@@ -158,14 +172,16 @@ func generateMasterPlaylist(outputDir string, variantPlaylists []string) {
 
 	for i, playlist := range variantPlaylists {
 		if playlist == "" {
-			fmt.Printf("Empty playlist at index %d\n", i)
+			logger.AppLogger.Warn("Empty playlist", zap.Int("index", i))
 			continue
 		}
 		res := resolutions[i]
 		entry := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d\n%s/%s\n",
 			getBandwidth(res), res.Width, res.Height, res.Name, playlist)
 		f.WriteString(entry)
-		fmt.Printf("Added to master playlist: %s", entry)
+		logger.AppLogger.Info("Added to master playlist",
+			zap.String("entry", entry),
+			zap.String("resolution", res.Name))
 	}
 }
 
@@ -238,10 +254,9 @@ func monitorProgress(stderr io.Reader, duration time.Duration, resName string) {
 			seconds, _ := strconv.Atoi(matches[3])
 			processedDuration := time.Duration(hours)*time.Hour + time.Duration(minutes)*time.Minute + time.Duration(seconds)*time.Second
 			progress := float64(processedDuration) / float64(duration) * 100
-			fmt.Printf("\rProgress (%s): %.2f%%", resName, progress)
-			// Flush the output to ensure it's displayed immediately
-			fmt.Print("\033[?25l") // Hide cursor
+			logger.AppLogger.Info("Progress",
+				zap.String("resolution", resName),
+				zap.Float64("percentage", progress))
 		}
 	}
-	fmt.Print("\033[?25h") // Show cursor
 }

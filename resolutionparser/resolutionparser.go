@@ -2,29 +2,31 @@ package resolutionparser
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"video_processor/appconst"
+	"video_processor/logger"
+
+	"go.uber.org/zap"
 )
 
 func Run(inputFile string, outputPrefix string, resolutions []int) {
 	inputHeight, err := getVideoHeight(inputFile)
 	if err != nil {
-		log.Fatalf("Error getting input video height: %v", err)
+		logger.AppLogger.Fatal("Error getting input video height", zap.Error(err))
 	}
 
-	log.Printf("Input video height: %d", inputHeight)
+	logger.AppLogger.Info("Input video height", zap.Int("height", inputHeight))
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, appconst.VideoMaxConcurrentResolutionParse)
 
 	for _, res := range resolutions {
 		if res >= inputHeight {
-			log.Printf("Skipping %dp resolution as it's higher than or equal to the input video height", res)
+			logger.AppLogger.Info("Skipping resolution", zap.Int("resolution", res), zap.String("reason", "higher than or equal to input video height"))
 			continue
 		}
 
@@ -37,9 +39,9 @@ func Run(inputFile string, outputPrefix string, resolutions []int) {
 			outputFile := fmt.Sprintf("%s_%dp.mp4", outputPrefix, res)
 			err := segmentVideo(inputFile, outputFile, res)
 			if err != nil {
-				log.Printf("Error processing %dp resolution: %v", res, err)
+				logger.AppLogger.Error("Error processing resolution", zap.Int("resolution", res), zap.Error(err))
 			} else {
-				log.Printf("Successfully created %dp segment", res)
+				logger.AppLogger.Info("Successfully created segment", zap.Int("resolution", res))
 			}
 		}(res)
 	}

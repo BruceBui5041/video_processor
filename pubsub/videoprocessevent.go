@@ -2,14 +2,14 @@ package pubsub
 
 import (
 	"context"
-	"fmt"
-	"log"
 	"strings"
 	"video_processor/appconst"
+	"video_processor/logger"
 	"video_processor/storagehandler"
 	"video_processor/utils"
 
 	"github.com/ThreeDotsLabs/watermill/message"
+	"go.uber.org/zap"
 )
 
 func SubscribeToVideoProcessed() {
@@ -17,7 +17,7 @@ func SubscribeToVideoProcessed() {
 
 	messages, err := subscriber.Subscribe(context.Background(), appconst.TopicVideoProcessed)
 	if err != nil {
-		log.Fatalf("Failed to subscribe: %v", err)
+		logger.AppLogger.Fatal("Failed to subscribe", zap.Error(err))
 	}
 
 	for msg := range messages {
@@ -28,16 +28,18 @@ func SubscribeToVideoProcessed() {
 func processMessage(msg *message.Message) {
 	parts := strings.Split(string(msg.Payload), ",")
 	if len(parts) != 2 {
-		log.Printf("Invalid message format: %s", msg.Payload)
+		logger.AppLogger.Error("Invalid message format", zap.String("payload", string(msg.Payload)))
 		return
 	}
 
 	inputFile, outputDir := parts[0], parts[1]
-	fmt.Printf("Video processed event received: input file: %s, output directory: %s\n", inputFile, outputDir)
+	logger.AppLogger.Info("Video processed event received",
+		zap.String("inputFile", inputFile),
+		zap.String("outputDir", outputDir))
 
 	filePaths, err := utils.GetFilePaths(outputDir)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+		logger.AppLogger.Error("Failed to get file paths", zap.Error(err), zap.String("outputDir", outputDir))
 		return
 	}
 
@@ -49,11 +51,19 @@ func processMessage(msg *message.Message) {
 
 			err := storagehandler.UploadFileToS3(path, appconst.AWSVideoS3BuckerName)
 			if err != nil {
-				log.Print(err.Error())
+				logger.AppLogger.Error("Failed to upload file to S3",
+					zap.Error(err),
+					zap.String("path", path),
+					zap.String("bucket", appconst.AWSVideoS3BuckerName))
+			} else {
+				logger.AppLogger.Info("File uploaded to S3 successfully",
+					zap.String("path", path),
+					zap.String("bucket", appconst.AWSVideoS3BuckerName))
 			}
 		}(path)
 	}
 
 	// Mark the message as processed
 	msg.Ack()
+	logger.AppLogger.Info("Message processed and acknowledged", zap.String("messageID", msg.UUID))
 }
