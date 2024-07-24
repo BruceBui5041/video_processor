@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"video_processor/constants"
+	"video_processor/appconst"
 )
 
 func Run(inputFile string, outputPrefix string, resolutions []int) {
@@ -20,7 +20,7 @@ func Run(inputFile string, outputPrefix string, resolutions []int) {
 	log.Printf("Input video height: %d", inputHeight)
 
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, constants.VideoMaxConcurrentResolutionParse)
+	sem := make(chan struct{}, appconst.VideoMaxConcurrentResolutionParse)
 
 	for _, res := range resolutions {
 		if res >= inputHeight {

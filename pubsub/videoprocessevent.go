@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"video_processor/constants"
+	"video_processor/appconst"
 	"video_processor/storagehandler"
 	"video_processor/utils"
 
@@ -15,7 +15,7 @@ import (
 func SubscribeToVideoProcessed() {
 	subscriber := Publisher
 
-	messages, err := subscriber.Subscribe(context.Background(), constants.TopicVideoProcessed)
+	messages, err := subscriber.Subscribe(context.Background(), appconst.TopicVideoProcessed)
 	if err != nil {
 		log.Fatalf("Failed to subscribe: %v", err)
 	}
@@ -41,13 +41,13 @@ func processMessage(msg *message.Message) {
 		return
 	}
 
-	sem := make(chan struct{}, constants.MaxConcurrentS3Push)
+	sem := make(chan struct{}, appconst.MaxConcurrentS3Push)
 	for _, path := range filePaths {
 		go func(path string) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			err := storagehandler.UploadFileToS3(path, constants.AWSVideoS3BuckerName)
+			err := storagehandler.UploadFileToS3(path, appconst.AWSVideoS3BuckerName)
 			if err != nil {
 				log.Print(err.Error())
 			}

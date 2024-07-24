@@ -7,7 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"video_processor/constants"
+	"video_processor/appconst"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -33,7 +33,7 @@ func init() {
 
 	// Load the configuration
 	cfg, err := config.LoadDefaultConfig(context.TODO(),
-		config.WithRegion(constants.AWSRegion),
+		config.WithRegion(appconst.AWSRegion),
 		config.WithCredentialsProvider(creds),
 	)
 	if err != nil {

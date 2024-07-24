@@ -13,8 +13,10 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"video_processor/constants"
+	"video_processor/appconst"
 	"video_processor/pubsub"
+	"video_processor/storagehandler"
+	"video_processor/utils"
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
@@ -34,9 +36,25 @@ var resolutions = []Resolution{
 }
 
 const maxConcurrentProcesses = 4
-const videoSegmentDuration = 3
+const videoSegmentDuration = 4
 
-func ExecHLSSegmentVideo(inputFile, outputDir string) {
+func StartSegmentProcess(inputFile, outputDir string) {
+	utils.CreateDirIfNotExist(appconst.UnprecessedVideoDir)
+	unprecessedVideoPath, err := storagehandler.GetS3File(
+		appconst.AWSVideoS3BuckerName,
+		inputFile,
+		appconst.UnprecessedVideoDir,
+	)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+
+	desireOutputPath := filepath.Join(outputDir, inputFile)
+	utils.CreateDirIfNotExist(desireOutputPath)
+	HLSSegmentVideo(unprecessedVideoPath, desireOutputPath)
+}
+
+func HLSSegmentVideo(inputFile, outputDir string) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		log.Fatal("FFmpeg not found. Please install FFmpeg to continue.")
 	}
@@ -120,7 +138,7 @@ func ExecHLSSegmentVideo(inputFile, outputDir string) {
 
 	// Publish event when processing is complete
 	msg := message.NewMessage(watermill.NewUUID(), []byte(fmt.Sprintf("%s,%s", inputFile, outputDir)))
-	if err := pubsub.Publisher.Publish(constants.TopicVideoProcessed, msg); err != nil {
+	if err := pubsub.Publisher.Publish(appconst.TopicVideoProcessed, msg); err != nil {
 		log.Printf("Failed to publish video_processed event: %v", err)
 	}
 }
