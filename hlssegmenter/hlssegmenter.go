@@ -24,20 +24,20 @@ import (
 )
 
 type Resolution struct {
-	Width  int
-	Height int
-	Name   string
+	Width           int
+	Height          int
+	Name            string
+	SegmentDuration int // New field for segment duration
 }
 
 var resolutions = []Resolution{
-	{Width: 1920, Height: 1080, Name: "1080p"},
-	{Width: 1280, Height: 720, Name: "720p"},
-	{Width: 854, Height: 480, Name: "480p"},
-	{Width: 640, Height: 360, Name: "360p"},
+	{Width: 1920, Height: 1080, Name: "1080p", SegmentDuration: 2},
+	{Width: 1280, Height: 720, Name: "720p", SegmentDuration: 3},
+	{Width: 854, Height: 480, Name: "480p", SegmentDuration: 4},
+	{Width: 640, Height: 360, Name: "360p", SegmentDuration: 5},
 }
 
 const maxConcurrentProcesses = 4
-const videoSegmentDuration = 4
 
 func StartSegmentProcess(inputFile, outputDir string) {
 	utils.CreateDirIfNotExist(appconst.UnprecessedVideoDir)
@@ -94,7 +94,7 @@ func HLSSegmentVideo(inputFile, outputDir string) {
 			}
 
 			playlistName := fmt.Sprintf("playlist_%s.m3u8", res.Name)
-			cmd, err := generateFFmpegCommand(inputFile, resolutionDir, playlistName, videoSegmentDuration, res)
+			cmd, err := generateFFmpegCommand(inputFile, resolutionDir, playlistName, res)
 			if err != nil {
 				logger.AppLogger.Error("Failed to generate FFmpeg command",
 					zap.Error(err),
@@ -217,7 +217,7 @@ func getVideoDuration(inputFile string) (time.Duration, error) {
 	return time.Duration(durationSec * float64(time.Second)), nil
 }
 
-func generateFFmpegCommand(inputFile, outputDir, playlistName string, segmentDuration int, res Resolution) (*exec.Cmd, error) {
+func generateFFmpegCommand(inputFile, outputDir, playlistName string, res Resolution) (*exec.Cmd, error) {
 	outputPath := filepath.Join(outputDir, "segment_%03d.ts")
 	playlistPath := filepath.Join(outputDir, playlistName)
 
@@ -226,14 +226,14 @@ func generateFFmpegCommand(inputFile, outputDir, playlistName string, segmentDur
 		"-profile:v", "main",
 		"-level", "3.1",
 		"-start_number", "0",
-		"-hls_time", fmt.Sprintf("%d", segmentDuration),
+		"-hls_time", fmt.Sprintf("%d", res.SegmentDuration),
 		"-hls_list_size", "0",
 		"-f", "hls",
 		"-vf", fmt.Sprintf("scale=%d:%d", res.Width, res.Height),
 		"-c:a", "aac",
 		"-ar", "48000",
 		"-b:a", "128k",
-		"-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d)", segmentDuration),
+		"-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d)", res.SegmentDuration),
 		"-hls_flags", "split_by_time+independent_segments",
 		"-hls_segment_type", "mpegts",
 		"-hls_segment_filename", outputPath,
