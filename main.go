@@ -2,10 +2,14 @@ package main
 
 import (
 	"log"
+	"net"
+	"video_processor/grpcserver"
+	pb "video_processor/proto/video_service/video_service"
 	redishander "video_processor/redishandler"
 	"video_processor/watermill"
 
 	"github.com/joho/godotenv"
+	"google.golang.org/grpc"
 )
 
 func main() {
@@ -34,5 +38,25 @@ func main() {
 	// if err != nil {
 	// 	fmt.Print(err.Error())
 	// }
-	select {}
+
+	// Start gRPC server
+	startGRPCServer()
+}
+
+func startGRPCServer() {
+	lis, err := net.Listen("tcp", ":50052")
+	if err != nil {
+		log.Fatalf("Failed to listen: %v", err)
+	}
+
+	s := grpc.NewServer()
+
+	// Register your gRPC services here
+	// For example:
+	pb.RegisterVideoServiceServer(s, &grpcserver.VideoServiceServer{})
+
+	log.Println("Starting gRPC server on :50052")
+	if err := s.Serve(lis); err != nil {
+		log.Fatalf("Failed to serve: %v", err)
+	}
 }

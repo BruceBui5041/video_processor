@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package videoservice;
+
+option go_package = "video_processor/proto";
+
+service VideoService {
+  rpc ProcessNewVideoRequest(VideoInfo) returns (ProcessNewVideoResponse) {}
+}
+
+message VideoInfo {
+  string video_id = 1;
+  string title = 2;
+  string description = 3;
+  string uploaded_by = 4;
+  int64 timestamp = 5;
+  string s3_key = 6;
+}
+
+message ProcessNewVideoResponse{
+    string status = 1;
+}
