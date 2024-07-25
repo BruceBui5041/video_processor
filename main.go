@@ -2,15 +2,15 @@ package main
 
 import (
 	"log"
-	"video_processor/hlssegmenter"
-	"video_processor/pubsub"
+	redishander "video_processor/redishandler"
+	"video_processor/watermill"
 
 	"github.com/joho/godotenv"
 )
 
 func main() {
-	fileName := "test.mp4"
-	outputDir := "segments"
+	// fileName := "test.mp4"
+	// outputDir := "segments"
 
 	err := godotenv.Load()
 	if err != nil {
@@ -18,9 +18,11 @@ func main() {
 	}
 
 	// Start the subscriber in a goroutine
-	go pubsub.SubscribeToVideoProcessed()
+	go watermill.SubscribeToTopics()
 
-	go hlssegmenter.StartSegmentProcess(fileName, outputDir)
+	go redishander.StartRedisSubscribers(redishander.RedisClient)
+
+	// go hlssegmenter.StartSegmentProcess(fileName, outputDir)
 
 	// clean up
 	// err = utils.DeleteLocalFile(unprecessedVideoPath)

@@ -1,4 +1,4 @@
-package pubsub
+package watermill
 
 import (
 	"github.com/ThreeDotsLabs/watermill"

@@ -6,7 +6,8 @@ const (
 )
 
 const (
-	TopicVideoProcessed = "video_processed"
+	TopicVideoProcessed   = "video_processed"
+	TopicNewVideoUploaded = "new_video_uploaded"
 )
 
 const (

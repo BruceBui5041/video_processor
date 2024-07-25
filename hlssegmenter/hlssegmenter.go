@@ -14,9 +14,9 @@ import (
 	"time"
 	"video_processor/appconst"
 	"video_processor/logger"
-	"video_processor/pubsub"
 	"video_processor/storagehandler"
 	"video_processor/utils"
+	appwatermill "video_processor/watermill"
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
@@ -153,7 +153,7 @@ func HLSSegmentVideo(inputFile, outputDir string) {
 
 	// Publish event when processing is complete
 	msg := message.NewMessage(watermill.NewUUID(), []byte(fmt.Sprintf("%s,%s", inputFile, outputDir)))
-	if err := pubsub.Publisher.Publish(appconst.TopicVideoProcessed, msg); err != nil {
+	if err := appwatermill.Publisher.Publish(appconst.TopicVideoProcessed, msg); err != nil {
 		logger.AppLogger.Error("Failed to publish video_processed event", zap.Error(err))
 	}
 }

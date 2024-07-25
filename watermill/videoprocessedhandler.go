@@ -1,7 +1,6 @@
-package pubsub
+package watermill
 
 import (
-	"context"
 	"strings"
 	"video_processor/appconst"
 	"video_processor/logger"
@@ -12,23 +11,11 @@ import (
 	"go.uber.org/zap"
 )
 
-func SubscribeToVideoProcessed() {
-	subscriber := Publisher
-
-	messages, err := subscriber.Subscribe(context.Background(), appconst.TopicVideoProcessed)
-	if err != nil {
-		logger.AppLogger.Fatal("Failed to subscribe", zap.Error(err))
-	}
-
-	for msg := range messages {
-		processMessage(msg)
-	}
-}
-
-func processMessage(msg *message.Message) {
+func HandleVideoProcessedVideoEvent(msg *message.Message) {
 	parts := strings.Split(string(msg.Payload), ",")
 	if len(parts) != 2 {
 		logger.AppLogger.Error("Invalid message format", zap.String("payload", string(msg.Payload)))
+		msg.Ack()
 		return
 	}
 
@@ -40,6 +27,7 @@ func processMessage(msg *message.Message) {
 	filePaths, err := utils.GetFilePaths(outputDir)
 	if err != nil {
 		logger.AppLogger.Error("Failed to get file paths", zap.Error(err), zap.String("outputDir", outputDir))
+		msg.Ack()
 		return
 	}
 
