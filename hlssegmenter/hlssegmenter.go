@@ -64,6 +64,9 @@ func HLSSegmentVideo(inputFile, outputDir string) {
 		logger.AppLogger.Fatal("Failed to create output directory", zap.Error(err), zap.String("outputDir", outputDir))
 	}
 
+	// Extract video name from inputFile
+	videoName := filepath.Base(inputFile)
+
 	duration, err := getVideoDuration(inputFile)
 	if err != nil {
 		logger.AppLogger.Fatal("Failed to get video duration", zap.Error(err), zap.String("inputFile", inputFile))
@@ -143,7 +146,7 @@ func HLSSegmentVideo(inputFile, outputDir string) {
 
 	logger.AppLogger.Info("Final variant playlists", zap.Strings("playlists", variantPlaylists))
 
-	generateMasterPlaylist(outputDir, variantPlaylists)
+	generateMasterPlaylist(outputDir, variantPlaylists, videoName)
 
 	logger.AppLogger.Info("HLS segmentation completed successfully for all resolutions",
 		zap.String("outputDir", outputDir))
@@ -155,7 +158,7 @@ func HLSSegmentVideo(inputFile, outputDir string) {
 	}
 }
 
-func generateMasterPlaylist(outputDir string, variantPlaylists []string) {
+func generateMasterPlaylist(outputDir string, variantPlaylists []string, videoName string) {
 	logger.AppLogger.Info("Generating master playlist", zap.Strings("variantPlaylists", variantPlaylists))
 
 	masterPlaylistPath := filepath.Join(outputDir, "master.m3u8")
@@ -176,8 +179,8 @@ func generateMasterPlaylist(outputDir string, variantPlaylists []string) {
 			continue
 		}
 		res := resolutions[i]
-		entry := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d\n%s/%s\n",
-			getBandwidth(res), res.Width, res.Height, res.Name, playlist)
+		entry := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d\n%s/%s/%s\n",
+			getBandwidth(res), res.Width, res.Height, videoName, res.Name, playlist)
 		f.WriteString(entry)
 		logger.AppLogger.Info("Added to master playlist",
 			zap.String("entry", entry),
