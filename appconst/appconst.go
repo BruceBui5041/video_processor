@@ -2,6 +2,7 @@ package appconst
 
 const (
 	VideoMaxConcurrentResolutionParse = 3
+	VideoMaxConcurrentHLSProcesses    = 1
 	UnprecessedVideoDir               = "unprocessed_video"
 )
 

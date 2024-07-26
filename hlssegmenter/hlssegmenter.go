@@ -34,8 +34,6 @@ var resolutions = []Resolution{
 	{Width: 640, Height: 360, Name: "360p", SegmentDuration: 5},
 }
 
-const maxConcurrentProcesses = 4
-
 func StartSegmentProcess(inputFile, outputDir string) (string, string, error) {
 	utils.CreateDirIfNotExist(appconst.UnprecessedVideoDir)
 	unprecessedVideoPath, err := storagehandler.GetS3File(
@@ -73,67 +71,77 @@ func hslSegmentVideo(inputFile, outputDir string) (string, string, error) {
 		return "", "", err
 	}
 
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, appconst.VideoMaxConcurrentHLSProcesses)
 	variantPlaylists := make([]string, len(resolutions))
 	var mu sync.Mutex
 
 	for i, res := range resolutions {
+		wg.Add(1)
+		go func(i int, res Resolution) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
-		resolutionDir := filepath.Join(outputDir, res.Name)
-		if err := os.MkdirAll(resolutionDir, os.ModePerm); err != nil {
-			logger.AppLogger.Error("Failed to create resolution directory",
-				zap.Error(err),
+			resolutionDir := filepath.Join(outputDir, res.Name)
+			if err := os.MkdirAll(resolutionDir, os.ModePerm); err != nil {
+				logger.AppLogger.Error("Failed to create resolution directory",
+					zap.Error(err),
+					zap.String("resolution", res.Name),
+					zap.String("dir", resolutionDir))
+				return
+			}
+
+			playlistName := fmt.Sprintf("playlist_%s.m3u8", res.Name)
+			cmd, err := generateFFmpegCommand(inputFile, resolutionDir, playlistName, res)
+			if err != nil {
+				logger.AppLogger.Error("Failed to generate FFmpeg command",
+					zap.Error(err),
+					zap.String("resolution", res.Name))
+				return
+			}
+
+			stderrPipe, err := cmd.StderrPipe()
+			if err != nil {
+				logger.AppLogger.Error("Failed to create stderr pipe",
+					zap.Error(err),
+					zap.String("resolution", res.Name))
+				return
+			}
+
+			logger.AppLogger.Info("Starting FFmpeg", zap.String("resolution", res.Name))
+
+			if err := cmd.Start(); err != nil {
+				logger.AppLogger.Error("Failed to start FFmpeg",
+					zap.Error(err),
+					zap.String("resolution", res.Name))
+				return
+			}
+
+			go monitorProgress(stderrPipe, duration, res.Name)
+
+			if err := cmd.Wait(); err != nil {
+				logger.AppLogger.Error("FFmpeg command failed",
+					zap.Error(err),
+					zap.String("resolution", res.Name))
+				return
+			}
+
+			logger.AppLogger.Info("FFmpeg completed successfully", zap.String("resolution", res.Name))
+
+			mu.Lock()
+			variantPlaylists[i] = playlistName
+			logger.AppLogger.Info("Added playlist",
 				zap.String("resolution", res.Name),
-				zap.String("dir", resolutionDir))
-			return "", "", err
-		}
+				zap.Int("index", i),
+				zap.String("playlist", playlistName))
+			mu.Unlock()
 
-		playlistName := fmt.Sprintf("playlist_%s.m3u8", res.Name)
-		cmd, err := generateFFmpegCommand(inputFile, resolutionDir, playlistName, res)
-		if err != nil {
-			logger.AppLogger.Error("Failed to generate FFmpeg command",
-				zap.Error(err),
-				zap.String("resolution", res.Name))
-			return "", "", err
-		}
-
-		stderrPipe, err := cmd.StderrPipe()
-		if err != nil {
-			logger.AppLogger.Error("Failed to create stderr pipe",
-				zap.Error(err),
-				zap.String("resolution", res.Name))
-			return "", "", err
-		}
-
-		logger.AppLogger.Info("Starting FFmpeg", zap.String("resolution", res.Name))
-
-		if err := cmd.Start(); err != nil {
-			logger.AppLogger.Error("Failed to start FFmpeg",
-				zap.Error(err),
-				zap.String("resolution", res.Name))
-			return "", "", err
-		}
-
-		go monitorProgress(stderrPipe, duration, res.Name)
-
-		if err := cmd.Wait(); err != nil {
-			logger.AppLogger.Error("FFmpeg command failed",
-				zap.Error(err),
-				zap.String("resolution", res.Name))
-			return "", "", err
-		}
-
-		logger.AppLogger.Info("FFmpeg completed successfully", zap.String("resolution", res.Name))
-
-		mu.Lock()
-		variantPlaylists[i] = playlistName
-		logger.AppLogger.Info("Added playlist",
-			zap.String("resolution", res.Name),
-			zap.Int("index", i),
-			zap.String("playlist", playlistName))
-		mu.Unlock()
-
-		logger.AppLogger.Info("HLS segmentation completed", zap.String("resolution", res.Name))
+			logger.AppLogger.Info("HLS segmentation completed", zap.String("resolution", res.Name))
+		}(i, res)
 	}
+
+	wg.Wait()
 
 	logger.AppLogger.Info("Final variant playlists", zap.Strings("playlists", variantPlaylists))
 
