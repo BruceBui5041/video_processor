@@ -16,10 +16,7 @@ import (
 	"video_processor/logger"
 	"video_processor/storagehandler"
 	"video_processor/utils"
-	appwatermill "video_processor/watermill"
 
-	"github.com/ThreeDotsLabs/watermill"
-	"github.com/ThreeDotsLabs/watermill/message"
 	"go.uber.org/zap"
 )
 
@@ -39,7 +36,7 @@ var resolutions = []Resolution{
 
 const maxConcurrentProcesses = 4
 
-func StartSegmentProcess(inputFile, outputDir string) {
+func StartSegmentProcess(inputFile, outputDir string) (string, string, error) {
 	utils.CreateDirIfNotExist(appconst.UnprecessedVideoDir)
 	unprecessedVideoPath, err := storagehandler.GetS3File(
 		appconst.AWSVideoS3BuckerName,
@@ -47,21 +44,24 @@ func StartSegmentProcess(inputFile, outputDir string) {
 		appconst.UnprecessedVideoDir,
 	)
 	if err != nil {
-		logger.AppLogger.Fatal("Failed to get S3 file", zap.Error(err), zap.String("inputFile", inputFile))
+		logger.AppLogger.Error("Failed to get S3 file", zap.Error(err), zap.String("inputFile", inputFile))
+		return "", "", err
 	}
 
-	desireOutputPath := filepath.Join(outputDir, inputFile)
+	desireOutputPath := filepath.Join(outputDir, filepath.Base(inputFile))
 	utils.CreateDirIfNotExist(desireOutputPath)
-	HLSSegmentVideo(unprecessedVideoPath, desireOutputPath)
+	return hslSegmentVideo(unprecessedVideoPath, desireOutputPath)
 }
 
-func HLSSegmentVideo(inputFile, outputDir string) {
+func hslSegmentVideo(inputFile, outputDir string) (string, string, error) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		logger.AppLogger.Fatal("FFmpeg not found. Please install FFmpeg to continue.", zap.Error(err))
+		logger.AppLogger.Error("FFmpeg not found. Please install FFmpeg to continue.", zap.Error(err))
+		return "", "", err
 	}
 
 	if err := os.MkdirAll(outputDir, os.ModePerm); err != nil {
-		logger.AppLogger.Fatal("Failed to create output directory", zap.Error(err), zap.String("outputDir", outputDir))
+		logger.AppLogger.Error("Failed to create output directory", zap.Error(err), zap.String("outputDir", outputDir))
+		return "", "", err
 	}
 
 	// Extract video name from inputFile
@@ -69,80 +69,71 @@ func HLSSegmentVideo(inputFile, outputDir string) {
 
 	duration, err := getVideoDuration(inputFile)
 	if err != nil {
-		logger.AppLogger.Fatal("Failed to get video duration", zap.Error(err), zap.String("inputFile", inputFile))
+		logger.AppLogger.Error("Failed to get video duration", zap.Error(err), zap.String("inputFile", inputFile))
+		return "", "", err
 	}
 
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, maxConcurrentProcesses)
 	variantPlaylists := make([]string, len(resolutions))
 	var mu sync.Mutex
 
 	for i, res := range resolutions {
-		wg.Add(1)
-		go func(i int, res Resolution) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
 
-			resolutionDir := filepath.Join(outputDir, res.Name)
-			if err := os.MkdirAll(resolutionDir, os.ModePerm); err != nil {
-				logger.AppLogger.Error("Failed to create resolution directory",
-					zap.Error(err),
-					zap.String("resolution", res.Name),
-					zap.String("dir", resolutionDir))
-				return
-			}
-
-			playlistName := fmt.Sprintf("playlist_%s.m3u8", res.Name)
-			cmd, err := generateFFmpegCommand(inputFile, resolutionDir, playlistName, res)
-			if err != nil {
-				logger.AppLogger.Error("Failed to generate FFmpeg command",
-					zap.Error(err),
-					zap.String("resolution", res.Name))
-				return
-			}
-
-			stderrPipe, err := cmd.StderrPipe()
-			if err != nil {
-				logger.AppLogger.Error("Failed to create stderr pipe",
-					zap.Error(err),
-					zap.String("resolution", res.Name))
-				return
-			}
-
-			logger.AppLogger.Info("Starting FFmpeg", zap.String("resolution", res.Name))
-
-			if err := cmd.Start(); err != nil {
-				logger.AppLogger.Error("Failed to start FFmpeg",
-					zap.Error(err),
-					zap.String("resolution", res.Name))
-				return
-			}
-
-			go monitorProgress(stderrPipe, duration, res.Name)
-
-			if err := cmd.Wait(); err != nil {
-				logger.AppLogger.Error("FFmpeg command failed",
-					zap.Error(err),
-					zap.String("resolution", res.Name))
-				return
-			}
-
-			logger.AppLogger.Info("FFmpeg completed successfully", zap.String("resolution", res.Name))
-
-			mu.Lock()
-			variantPlaylists[i] = playlistName
-			logger.AppLogger.Info("Added playlist",
+		resolutionDir := filepath.Join(outputDir, res.Name)
+		if err := os.MkdirAll(resolutionDir, os.ModePerm); err != nil {
+			logger.AppLogger.Error("Failed to create resolution directory",
+				zap.Error(err),
 				zap.String("resolution", res.Name),
-				zap.Int("index", i),
-				zap.String("playlist", playlistName))
-			mu.Unlock()
+				zap.String("dir", resolutionDir))
+			return "", "", err
+		}
 
-			logger.AppLogger.Info("HLS segmentation completed", zap.String("resolution", res.Name))
-		}(i, res)
+		playlistName := fmt.Sprintf("playlist_%s.m3u8", res.Name)
+		cmd, err := generateFFmpegCommand(inputFile, resolutionDir, playlistName, res)
+		if err != nil {
+			logger.AppLogger.Error("Failed to generate FFmpeg command",
+				zap.Error(err),
+				zap.String("resolution", res.Name))
+			return "", "", err
+		}
+
+		stderrPipe, err := cmd.StderrPipe()
+		if err != nil {
+			logger.AppLogger.Error("Failed to create stderr pipe",
+				zap.Error(err),
+				zap.String("resolution", res.Name))
+			return "", "", err
+		}
+
+		logger.AppLogger.Info("Starting FFmpeg", zap.String("resolution", res.Name))
+
+		if err := cmd.Start(); err != nil {
+			logger.AppLogger.Error("Failed to start FFmpeg",
+				zap.Error(err),
+				zap.String("resolution", res.Name))
+			return "", "", err
+		}
+
+		go monitorProgress(stderrPipe, duration, res.Name)
+
+		if err := cmd.Wait(); err != nil {
+			logger.AppLogger.Error("FFmpeg command failed",
+				zap.Error(err),
+				zap.String("resolution", res.Name))
+			return "", "", err
+		}
+
+		logger.AppLogger.Info("FFmpeg completed successfully", zap.String("resolution", res.Name))
+
+		mu.Lock()
+		variantPlaylists[i] = playlistName
+		logger.AppLogger.Info("Added playlist",
+			zap.String("resolution", res.Name),
+			zap.Int("index", i),
+			zap.String("playlist", playlistName))
+		mu.Unlock()
+
+		logger.AppLogger.Info("HLS segmentation completed", zap.String("resolution", res.Name))
 	}
-
-	wg.Wait()
 
 	logger.AppLogger.Info("Final variant playlists", zap.Strings("playlists", variantPlaylists))
 
@@ -151,11 +142,7 @@ func HLSSegmentVideo(inputFile, outputDir string) {
 	logger.AppLogger.Info("HLS segmentation completed successfully for all resolutions",
 		zap.String("outputDir", outputDir))
 
-	// Publish event when processing is complete
-	msg := message.NewMessage(watermill.NewUUID(), []byte(fmt.Sprintf("%s,%s", inputFile, outputDir)))
-	if err := appwatermill.Publisher.Publish(appconst.TopicVideoProcessed, msg); err != nil {
-		logger.AppLogger.Error("Failed to publish video_processed event", zap.Error(err))
-	}
+	return inputFile, outputDir, nil
 }
 
 func generateMasterPlaylist(outputDir string, variantPlaylists []string, videoName string) {

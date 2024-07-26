@@ -1,9 +1,10 @@
 package watermill
 
 import (
-	"strings"
+	"encoding/json"
 	"video_processor/appconst"
 	"video_processor/logger"
+	"video_processor/messagemodel"
 	"video_processor/storagehandler"
 	"video_processor/utils"
 
@@ -12,17 +13,20 @@ import (
 )
 
 func HandleVideoProcessedVideoEvent(msg *message.Message) {
-	parts := strings.Split(string(msg.Payload), ",")
-	if len(parts) != 2 {
-		logger.AppLogger.Error("Invalid message format", zap.String("payload", string(msg.Payload)))
+	var proccessedSegmentsInfo *messagemodel.ProcessedSegmentsInfo
+	err := json.Unmarshal(msg.Payload, &proccessedSegmentsInfo)
+	if err != nil {
+		logger.AppLogger.Error(
+			"cannot unmarchal msg payload",
+			zap.String("payload",
+				string(msg.Payload)),
+			zap.Error(err),
+		)
 		msg.Ack()
 		return
 	}
 
-	inputFile, outputDir := parts[0], parts[1]
-	logger.AppLogger.Info("Video processed event received",
-		zap.String("inputFile", inputFile),
-		zap.String("outputDir", outputDir))
+	outputDir := proccessedSegmentsInfo.LocalOutputDir
 
 	filePaths, err := utils.GetFilePaths(outputDir)
 	if err != nil {
