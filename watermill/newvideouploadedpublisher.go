@@ -24,7 +24,7 @@ func PublishVideoUploadedEvent(videoInfo *messagemodel.VideoInfo) error {
 	}
 
 	// Create a Watermill message
-	watermillMsg := message.NewMessage(videoInfo.VideoID, payload)
+	watermillMsg := message.NewMessage(videoInfo.VideoSlug, payload)
 	err = Publisher.Publish(appconst.TopicNewVideoUploaded, watermillMsg)
 	if err != nil {
 		logger.AppLogger.Error(

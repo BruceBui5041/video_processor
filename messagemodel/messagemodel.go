@@ -2,15 +2,16 @@ package messagemodel
 
 // VideoInfo represents the information about a newly uploaded video
 type VideoInfo struct {
-	VideoID     string `json:"video_id"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	UploadedBy  string `json:"uploaded_by"`
 	Timestamp   int64  `json:"timestamp"`
-	S3Key       string `json:"s3key"`
+	RawVidS3Key string `json:"s3key"`
+	CourseSlug  string `json:"course_slug"`
+	VideoSlug   string `json:"video_slug"`
+	UserEmail   string `json:"user_email"`
 }
 
 type ProcessedSegmentsInfo struct {
-	VideoName      string `json:"video_name"`
+	CourseSlug     string `json:"course_slug"`
+	VideoSlug      string `json:"video_slug"`
+	UserEmail      string `json:"user_email"`
 	LocalOutputDir string `json:"local_output_dir"`
 }

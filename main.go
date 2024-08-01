@@ -53,7 +53,7 @@ func startGRPCServer() {
 
 	// Register your gRPC services here
 	// For example:
-	pb.RegisterVideoServiceServer(s, &grpcserver.VideoServiceServer{})
+	pb.RegisterVideoProcessingServiceServer(s, &grpcserver.VideoServiceServer{})
 
 	log.Println("Starting gRPC server on :50052")
 	if err := s.Serve(lis); err != nil {

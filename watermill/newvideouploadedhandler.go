@@ -19,21 +19,23 @@ func HandleNewVideoUploadEvent(msg *message.Message) {
 		return
 	}
 
-	if videoInfo.S3Key == "" {
-		logger.AppLogger.Error("S3Key is empty", zap.Any("videoInfo", videoInfo))
+	if videoInfo.RawVidS3Key == "" {
+		logger.AppLogger.Error("s3key is empty", zap.Any("videoInfo", videoInfo))
 		return
 	}
 
 	segmentOutputDir := os.Getenv("OUTPUT_SEGMENT_DIR")
-	_, logcalOutputDir, err := hlssegmenter.StartSegmentProcess(videoInfo.S3Key, segmentOutputDir)
+	logcalOutputDir, err := hlssegmenter.StartSegmentProcess(videoInfo.RawVidS3Key, segmentOutputDir)
 
 	if err != nil {
-		logger.AppLogger.Error("cannot start segment process", zap.Error(err), zap.Any("S3Key", videoInfo.S3Key))
+		logger.AppLogger.Error("cannot start segment process", zap.Error(err), zap.Any("S3Key", videoInfo.RawVidS3Key))
 		return
 	}
 
 	processedSegmentsInfo := messagemodel.ProcessedSegmentsInfo{
-		VideoName:      videoInfo.Title,
+		VideoSlug:      videoInfo.VideoSlug,
+		CourseSlug:     videoInfo.CourseSlug,
+		UserEmail:      videoInfo.UserEmail,
 		LocalOutputDir: logcalOutputDir,
 	}
 

@@ -4,15 +4,15 @@ package videoservice;
 
 option go_package = "video_processor/proto";
 
-service VideoService {
+service VideoProcessingService {
   rpc ProcessNewVideoRequest(VideoInfo) returns (ProcessNewVideoResponse) {}
 }
 
 message VideoInfo {
-  string video_id = 1;
-  string title = 2;
+  string video_slug = 1;
+  string course_slug = 2;
   string description = 3;
-  string uploaded_by = 4;
+  string user_email = 4;
   int64 timestamp = 5;
   string s3_key = 6;
 }

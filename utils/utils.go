@@ -37,12 +37,11 @@ func GetVideoNames(folderPath string) ([]string, error) {
 }
 
 func RemoveFileExtension(filename string) string {
-	base := filepath.Base(filename)
-	dotIndex := strings.LastIndex(base, ".")
+	dotIndex := strings.LastIndex(filename, ".")
 	if dotIndex <= 0 {
-		return base
+		return filename
 	}
-	return base[:dotIndex]
+	return filename[:dotIndex]
 }
 
 func GetFilePaths(dirPath string) ([]string, error) {

@@ -34,32 +34,37 @@ var resolutions = []Resolution{
 	{Width: 640, Height: 360, Name: "360p", SegmentDuration: 5},
 }
 
-func StartSegmentProcess(inputFile, outputDir string) (string, string, error) {
+func StartSegmentProcess(rawVidS3Key, outputDir string) (string, error) {
 	utils.CreateDirIfNotExist(appconst.UnprecessedVideoDir)
 	unprecessedVideoPath, err := storagehandler.GetS3File(
 		appconst.AWSVideoS3BuckerName,
-		inputFile,
+		rawVidS3Key,
 		appconst.UnprecessedVideoDir,
 	)
 	if err != nil {
-		logger.AppLogger.Error("Failed to get S3 file", zap.Error(err), zap.String("inputFile", inputFile))
-		return "", "", err
+		logger.AppLogger.Error("Failed to get S3 file", zap.Error(err), zap.String("rawVidS3Key", rawVidS3Key))
+		return "", err
 	}
 
-	desireOutputPath := filepath.Join(outputDir, filepath.Base(inputFile))
-	utils.CreateDirIfNotExist(desireOutputPath)
-	return hslSegmentVideo(unprecessedVideoPath, desireOutputPath)
+	utils.CreateDirIfNotExist(rawVidS3Key)
+	excludesExtPath := utils.RemoveFileExtension(rawVidS3Key)
+	err = hslSegmentVideo(unprecessedVideoPath, excludesExtPath)
+	if err != nil {
+		return "", err
+	}
+
+	return excludesExtPath, nil
 }
 
-func hslSegmentVideo(inputFile, outputDir string) (string, string, error) {
+func hslSegmentVideo(inputFile, outputDir string) error {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		logger.AppLogger.Error("FFmpeg not found. Please install FFmpeg to continue.", zap.Error(err))
-		return "", "", err
+		return err
 	}
 
 	if err := os.MkdirAll(outputDir, os.ModePerm); err != nil {
 		logger.AppLogger.Error("Failed to create output directory", zap.Error(err), zap.String("outputDir", outputDir))
-		return "", "", err
+		return err
 	}
 
 	// Extract video name from inputFile
@@ -68,7 +73,7 @@ func hslSegmentVideo(inputFile, outputDir string) (string, string, error) {
 	duration, err := getVideoDuration(inputFile)
 	if err != nil {
 		logger.AppLogger.Error("Failed to get video duration", zap.Error(err), zap.String("inputFile", inputFile))
-		return "", "", err
+		return err
 	}
 
 	var wg sync.WaitGroup
@@ -145,12 +150,12 @@ func hslSegmentVideo(inputFile, outputDir string) (string, string, error) {
 
 	logger.AppLogger.Info("Final variant playlists", zap.Strings("playlists", variantPlaylists))
 
-	generateMasterPlaylist(outputDir, variantPlaylists, videoName)
+	generateMasterPlaylist(outputDir, variantPlaylists, utils.RemoveFileExtension(videoName))
 
 	logger.AppLogger.Info("HLS segmentation completed successfully for all resolutions",
 		zap.String("outputDir", outputDir))
 
-	return inputFile, outputDir, nil
+	return nil
 }
 
 func generateMasterPlaylist(outputDir string, variantPlaylists []string, videoName string) {

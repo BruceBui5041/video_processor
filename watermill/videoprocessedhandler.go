@@ -40,6 +40,12 @@ func HandleVideoProcessedVideoEvent(msg *message.Message) {
 		go func(path string) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			storagehandler.GenerateSegmentS3Key(storagehandler.VideoInfo{
+				Useremail:  proccessedSegmentsInfo.UserEmail,
+				CourseSlug: proccessedSegmentsInfo.CourseSlug,
+				VideoSlug:  proccessedSegmentsInfo.VideoSlug,
+				// Filename: ,
+			})
 
 			err := storagehandler.UploadFileToS3(path, appconst.AWSVideoS3BuckerName)
 			if err != nil {
