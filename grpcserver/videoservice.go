@@ -20,9 +20,9 @@ func (s *VideoServiceServer) ProcessNewVideoRequest(ctx context.Context, req *pb
 	videoInfo := messagemodel.VideoInfo{
 		RawVidS3Key: req.S3Key,
 		Timestamp:   req.Timestamp,
-		CourseSlug:  req.CourseSlug,
-		VideoSlug:   req.VideoSlug,
-		UserEmail:   req.UserEmail,
+		CourseId:    req.CourseId,
+		VideoId:     req.VideoId,
+		UploadedBy:  req.UploadedBy,
 	}
 
 	logger.AppLogger.Info("videoInfo", zap.Any("videoInfo", videoInfo))

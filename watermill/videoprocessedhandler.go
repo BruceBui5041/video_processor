@@ -41,10 +41,9 @@ func HandleVideoProcessedVideoEvent(msg *message.Message) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			storagehandler.GenerateSegmentS3Key(storagehandler.VideoInfo{
-				Useremail:  proccessedSegmentsInfo.UserEmail,
-				CourseSlug: proccessedSegmentsInfo.CourseSlug,
-				VideoSlug:  proccessedSegmentsInfo.VideoSlug,
-				// Filename: ,
+				UploadedBy: proccessedSegmentsInfo.UploadedBy,
+				CourseId:   proccessedSegmentsInfo.CourseId,
+				VideoId:    proccessedSegmentsInfo.VideoId,
 			})
 
 			err := storagehandler.UploadFileToS3(path, appconst.AWSVideoS3BuckerName)

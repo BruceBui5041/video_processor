@@ -33,9 +33,9 @@ func HandleNewVideoUploadEvent(msg *message.Message) {
 	}
 
 	processedSegmentsInfo := messagemodel.ProcessedSegmentsInfo{
-		VideoSlug:      videoInfo.VideoSlug,
-		CourseSlug:     videoInfo.CourseSlug,
-		UserEmail:      videoInfo.UserEmail,
+		VideoId:        videoInfo.VideoId,
+		CourseId:       videoInfo.CourseId,
+		UploadedBy:     videoInfo.UploadedBy,
 		LocalOutputDir: logcalOutputDir,
 	}
 

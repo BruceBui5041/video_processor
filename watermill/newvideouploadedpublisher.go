@@ -8,6 +8,7 @@ import (
 	"video_processor/messagemodel"
 
 	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -24,7 +25,7 @@ func PublishVideoUploadedEvent(videoInfo *messagemodel.VideoInfo) error {
 	}
 
 	// Create a Watermill message
-	watermillMsg := message.NewMessage(videoInfo.VideoSlug, payload)
+	watermillMsg := message.NewMessage(uuid.NewString(), payload)
 	err = Publisher.Publish(appconst.TopicNewVideoUploaded, watermillMsg)
 	if err != nil {
 		logger.AppLogger.Error(
